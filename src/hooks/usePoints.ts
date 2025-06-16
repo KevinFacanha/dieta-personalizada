@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase, withRetry } from '../lib/supabase';
+import { supabase, withRetry, checkSupabaseConnection } from '../lib/supabase';
 import type { AuthState, DailyMeals } from '../types';
 
 export function usePoints(auth: AuthState) {
@@ -7,9 +7,20 @@ export function usePoints(auth: AuthState) {
   const [error, setError] = useState<string | null>(null);
 
   const initializeUserPoints = useCallback(async () => {
-    if (!auth.user?.email) return;
+    if (!auth.user?.email) {
+      setLoading(false);
+      return;
+    }
 
     try {
+      setError(null);
+      
+      // First check if we can connect to Supabase
+      const canConnect = await checkSupabaseConnection();
+      if (!canConnect) {
+        throw new Error('Unable to connect to Supabase. Please check your internet connection.');
+      }
+
       const { data: { user }, error: authError } = await withRetry(
         () => supabase.auth.getUser(),
         3,
@@ -17,8 +28,14 @@ export function usePoints(auth: AuthState) {
         false // Não usar delay exponencial para auth
       );
       
-      if (authError) throw authError;
-      if (!user) throw new Error('No authenticated user found');
+      if (authError) {
+        console.error('Auth error:', authError);
+        throw new Error(`Authentication failed: ${authError.message}`);
+      }
+      
+      if (!user) {
+        throw new Error('No authenticated user found');
+      }
 
       // Primeiro tenta obter pontos existentes
       const { data: existingPoints, error: fetchError } = await withRetry(() =>
@@ -30,7 +47,8 @@ export function usePoints(auth: AuthState) {
       );
 
       if (fetchError && fetchError.code !== 'PGRST116') {
-        throw fetchError;
+        console.error('Fetch points error:', fetchError);
+        throw new Error(`Failed to fetch user points: ${fetchError.message}`);
       }
 
       // Se não existem pontos, cria um novo registro
@@ -50,7 +68,10 @@ export function usePoints(auth: AuthState) {
             .single()
         );
 
-        if (insertError) throw insertError;
+        if (insertError) {
+          console.error('Insert points error:', insertError);
+          throw new Error(`Failed to create user points: ${insertError.message}`);
+        }
 
         auth.user.points = 0;
         auth.user.freeWeeklyMeals = 0;
@@ -67,9 +88,11 @@ export function usePoints(auth: AuthState) {
           .eq('user_id', user.id)
       );
 
-      if (historyError) throw historyError;
-
-      if (mealHistory) {
+      if (historyError) {
+        console.error('Meal history error:', historyError);
+        // Don't throw here, just log the error and continue without meal history
+        console.warn('Failed to load meal history, continuing without it');
+      } else if (mealHistory) {
         const formattedHistory: Record<string, DailyMeals> = {};
         mealHistory.forEach(record => {
           formattedHistory[record.date] = {
@@ -85,10 +108,22 @@ export function usePoints(auth: AuthState) {
 
     } catch (err: any) {
       console.error('Error initializing user points:', err);
-      setError(err?.message || 'Falha ao inicializar pontos do usuário');
+      
+      // Provide more specific error messages
+      let errorMessage = 'Falha ao inicializar pontos do usuário';
+      
+      if (err?.message?.includes('fetch')) {
+        errorMessage = 'Erro de conexão. Verifique sua internet e tente novamente.';
+      } else if (err?.message?.includes('Authentication')) {
+        errorMessage = 'Erro de autenticação. Faça login novamente.';
+      } else if (err?.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
       
       // Se for erro de autenticação, limpa o estado
-      if (err?.status === 401 || err?.status === 403) {
+      if (err?.status === 401 || err?.status === 403 || err?.message?.includes('Authentication')) {
         auth.isAuthenticated = false;
         auth.user = null;
       }
@@ -109,7 +144,7 @@ export function usePoints(auth: AuthState) {
         supabase.auth.getUser()
       );
       
-      if (authError) throw authError;
+      if (authError) throw new Error(`Authentication failed: ${authError.message}`);
       if (!user) throw new Error('No authenticated user found');
 
       const { error } = await withRetry(() =>
@@ -119,7 +154,7 @@ export function usePoints(auth: AuthState) {
           .eq('user_id', user.id)
       );
 
-      if (error) throw error;
+      if (error) throw new Error(`Failed to update points: ${error.message}`);
     } catch (err: any) {
       console.error('Error updating points:', err);
       throw new Error(err?.message || 'Falha ao atualizar pontos');
@@ -134,7 +169,7 @@ export function usePoints(auth: AuthState) {
         supabase.auth.getUser()
       );
       
-      if (authError) throw authError;
+      if (authError) throw new Error(`Authentication failed: ${authError.message}`);
       if (!user) throw new Error('No authenticated user found');
 
       const { error } = await withRetry(() =>
@@ -147,7 +182,7 @@ export function usePoints(auth: AuthState) {
           .eq('user_id', user.id)
       );
 
-      if (error) throw error;
+      if (error) throw new Error(`Failed to update free weekly meals: ${error.message}`);
     } catch (err: any) {
       console.error('Error updating free weekly meals:', err);
       throw new Error(err?.message || 'Falha ao atualizar refeições livres');
@@ -162,7 +197,7 @@ export function usePoints(auth: AuthState) {
         supabase.auth.getUser()
       );
       
-      if (authError) throw authError;
+      if (authError) throw new Error(`Authentication failed: ${authError.message}`);
       if (!user) throw new Error('No authenticated user found');
 
       const mealTypeMap: Record<keyof DailyMeals, string> = {
@@ -185,7 +220,7 @@ export function usePoints(auth: AuthState) {
       );
 
       if (fetchError && fetchError.code !== 'PGRST116') {
-        throw fetchError;
+        throw new Error(`Failed to fetch meal history: ${fetchError.message}`);
       }
 
       if (existingRecord) {
@@ -199,7 +234,7 @@ export function usePoints(auth: AuthState) {
             .eq('id', existingRecord.id)
         );
 
-        if (updateError) throw updateError;
+        if (updateError) throw new Error(`Failed to update meal: ${updateError.message}`);
       } else {
         const { error: insertError } = await withRetry(() =>
           supabase
@@ -211,7 +246,7 @@ export function usePoints(auth: AuthState) {
             }])
         );
 
-        if (insertError) throw insertError;
+        if (insertError) throw new Error(`Failed to record meal: ${insertError.message}`);
       }
     } catch (err: any) {
       console.error('Error recording meal:', err);
