@@ -17,7 +17,7 @@ export interface UserData {
   gender: 'male' | 'female';
   activityLevel: string;
   sleepHours: number;
-  goal: 'muscle' | 'fat_loss';
+  goal?: 'muscle' | 'fat_loss';
 }
 
 export interface Meal {

@@ -12,10 +12,13 @@ import MealTrackingCalendar from './components/MealTrackingCalendar';
 import CelebrationModal from './components/CelebrationModal';
 import PreferencesButton from './components/PreferencesButton';
 import FoodPreferencesModal from './components/FoodPreferencesModal';
+import SubscriptionButton from './components/SubscriptionButton';
+import PlanUpgradeModal from './components/PlanUpgradeModal';
 import { calculateBMR, adjustCalories, generateMealPlan, generateRecommendations } from './utils/calculations';
 import { usePoints } from './hooks/usePoints';
 import { useResetPoints } from './hooks/useResetPoints';
 import { useFoodPreferences } from './hooks/useFoodPreferences';
+import { usePlanRestrictions } from './hooks/usePlanRestrictions';
 import { supabase } from './lib/supabase';
 import type { UserData, DietPlanType, AuthState, FoodPreferences as FoodPreferencesType, RewardMeal, DailyMeals } from './types';
 
@@ -28,6 +31,8 @@ function App() {
   const [showRegister, setShowRegister] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [restrictedFeature, setRestrictedFeature] = useState<{feature: string, name: string} | null>(null);
   const [userGoal, setUserGoal] = useState<'muscle' | 'fat_loss' | null>(null);
   const [dietPlan, setDietPlan] = useState<DietPlanType | null>(null);
 
@@ -37,12 +42,45 @@ function App() {
   // Custom hooks
   const { loading, error, updatePoints, updateFreeWeeklyMeals, recordMeal } = usePoints(auth);
   const { saveFoodPreferences, loadFoodPreferences } = useFoodPreferences();
+  const {
+    canAccessPoints,
+    canAccessHistory,
+    canAccessRewards,
+    getMealLimit,
+    getRestrictedFeatureName,
+    currentPlan
+  } = usePlanRestrictions();
   
   useResetPoints();
+
+  // Check feature access and show upgrade modal if needed
+  const checkFeatureAccess = useCallback((feature: string) => {
+    const hasAccess = {
+      points_system: canAccessPoints(),
+      history: canAccessHistory(),
+      rewards: canAccessRewards()
+    }[feature];
+
+    if (!hasAccess) {
+      setRestrictedFeature({
+        feature,
+        name: getRestrictedFeatureName(feature)
+      });
+      setShowUpgradeModal(true);
+      return false;
+    }
+    return true;
+  }, [canAccessPoints, canAccessHistory, canAccessRewards, getRestrictedFeatureName]);
 
   // Callbacks
   const handleMealComplete = useCallback(async (mealType: keyof DailyMeals, points: number) => {
     if (!auth.user) return;
+
+    // Check if points system is available
+    if (!canAccessPoints()) {
+      checkFeatureAccess('points_system');
+      return;
+    }
 
     const today = new Date().toISOString().split('T')[0];
     
@@ -90,10 +128,16 @@ function App() {
     } catch (err) {
       console.error('Error completing meal:', err);
     }
-  }, [auth.user, recordMeal, updatePoints]);
+  }, [auth.user, recordMeal, updatePoints, canAccessPoints, checkFeatureAccess]);
 
   const handleRedeemMeal = useCallback(async (meal: RewardMeal) => {
     if (!auth.user || auth.user.points < meal.points || auth.user.freeWeeklyMeals >= 2) {
+      return;
+    }
+
+    // Check if rewards system is available
+    if (!canAccessRewards()) {
+      checkFeatureAccess('rewards');
       return;
     }
 
@@ -114,7 +158,7 @@ function App() {
     } catch (err) {
       console.error('Error redeeming meal:', err);
     }
-  }, [auth.user, updatePoints, updateFreeWeeklyMeals]);
+  }, [auth.user, updatePoints, updateFreeWeeklyMeals, canAccessRewards, checkFeatureAccess]);
 
   const handleSubmit = useCallback((userData: UserData) => {
     if (!auth.user?.preferences || !userGoal) {
@@ -124,7 +168,10 @@ function App() {
 
     const bmr = calculateBMR(userData);
     const adjustedCalories = adjustCalories(bmr, userData.activityLevel, userData.sleepHours, userGoal);
-    const { meals, macroDistribution } = generateMealPlan(adjustedCalories, auth.user.preferences, userGoal);
+    
+    // Limit meals based on plan
+    const mealLimit = getMealLimit();
+    const { meals, macroDistribution } = generateMealPlan(adjustedCalories, auth.user.preferences, userGoal, mealLimit);
     
     setDietPlan({
       calories: adjustedCalories,
@@ -132,7 +179,7 @@ function App() {
       recommendations: generateRecommendations({ ...userData, goal: userGoal }),
       macroDistribution
     });
-  }, [auth.user?.preferences, userGoal]);
+  }, [auth.user?.preferences, userGoal, getMealLimit]);
 
   const handleLogin = useCallback(async (email: string, password: string) => {
     try {
@@ -333,6 +380,16 @@ function App() {
     dinner: false
   };
 
+  // Filter meals based on plan limits
+  const mealLimit = getMealLimit();
+  const availableMeals = [
+    { key: 'breakfast' as keyof DailyMeals, name: 'Café da Manhã', points: 25 },
+    { key: 'lunch' as keyof DailyMeals, name: 'Almoço', points: 50 },
+    { key: 'dinner' as keyof DailyMeals, name: 'Jantar', points: 50 },
+    { key: 'morningSnack' as keyof DailyMeals, name: 'Lanche da Manhã', points: 25 },
+    { key: 'afternoonSnack' as keyof DailyMeals, name: 'Lanche da Tarde', points: 25 }
+  ].slice(0, mealLimit);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50">
       <div className="container mx-auto px-4 py-4 sm:py-8">
@@ -342,18 +399,17 @@ function App() {
               Assistente de Dieta Personalizada
             </h1>
             <div className="flex flex-wrap items-center gap-4">
-              {auth.user && (
-                <>
-                  <PointsDisplay
-                    points={auth.user.points}
-                    freeWeeklyMeals={auth.user.freeWeeklyMeals}
-                    onRedeemMeal={handleRedeemMeal}
-                  />
-                  <PreferencesButton
-                    onClick={() => setShowPreferences(true)}
-                  />
-                </>
+              <SubscriptionButton />
+              {auth.user && canAccessPoints() && (
+                <PointsDisplay
+                  points={auth.user.points}
+                  freeWeeklyMeals={auth.user.freeWeeklyMeals}
+                  onRedeemMeal={handleRedeemMeal}
+                />
               )}
+              <PreferencesButton
+                onClick={() => setShowPreferences(true)}
+              />
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-600">
                   Olá, {auth.user?.name}!
@@ -366,6 +422,17 @@ function App() {
                 </button>
               </div>
             </div>
+          </div>
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <span className="text-sm text-gray-600">Plano atual:</span>
+            <span className={`
+              px-3 py-1 rounded-full text-sm font-medium
+              ${currentPlan === 'Free' ? 'bg-gray-100 text-gray-800' :
+                currentPlan === 'Pro' ? 'bg-blue-100 text-blue-800' :
+                'bg-purple-100 text-purple-800'}
+            `}>
+              {currentPlan}
+            </span>
           </div>
           <p className="text-gray-600 max-w-2xl mx-auto leading-relaxed px-4">
             Crie seu plano alimentar personalizado baseado no seu metabolismo,
@@ -387,9 +454,26 @@ function App() {
               <UserForm onSubmit={handleSubmit} onDietGenerated={scrollToDiet} />
             </div>
 
-            {auth.user?.mealHistory && (
+            {auth.user?.mealHistory && canAccessHistory() && (
               <div className="min-h-[500px]">
                 <MealTrackingCalendar mealHistory={auth.user.mealHistory} />
+              </div>
+            )}
+
+            {auth.user?.mealHistory && !canAccessHistory() && (
+              <div className="bg-white rounded-xl shadow-lg p-6 text-center">
+                <h3 className="text-lg font-semibold text-gray-800 mb-2">
+                  Histórico de Refeições
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  Acompanhe seu progresso com o histórico completo de refeições
+                </p>
+                <button
+                  onClick={() => checkFeatureAccess('history')}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Fazer Upgrade
+                </button>
               </div>
             )}
           </div>
@@ -406,38 +490,19 @@ function App() {
                   </h2>
                 </div>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 w-full sm:w-auto">
-                    <MealCheckbox
-                      mealName="Café da Manhã"
-                      points={25}
-                      onComplete={() => handleMealComplete('breakfast', 25)}
-                      disabled={todayMeals.breakfast}
-                    />
-                    <MealCheckbox
-                      mealName="Lanche da Manhã"
-                      points={25}
-                      onComplete={() => handleMealComplete('morningSnack', 25)}
-                      disabled={todayMeals.morningSnack}
-                    />
-                    <MealCheckbox
-                      mealName="Almoço"
-                      points={50}
-                      onComplete={() => handleMealComplete('lunch', 50)}
-                      disabled={todayMeals.lunch}
-                    />
-                    <MealCheckbox
-                      mealName="Lanche da Tarde"
-                      points={25}
-                      onComplete={() => handleMealComplete('afternoonSnack', 25)}
-                      disabled={todayMeals.afternoonSnack}
-                    />
-                    <MealCheckbox
-                      mealName="Jantar"
-                      points={50}
-                      onComplete={() => handleMealComplete('dinner', 50)}
-                      disabled={todayMeals.dinner}
-                    />
-                  </div>
+                  {canAccessPoints() && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 w-full sm:w-auto">
+                      {availableMeals.map(meal => (
+                        <MealCheckbox
+                          key={meal.key}
+                          mealName={meal.name}
+                          points={meal.points}
+                          onComplete={() => handleMealComplete(meal.key, meal.points)}
+                          disabled={todayMeals[meal.key]}
+                        />
+                      ))}
+                    </div>
+                  )}
                   <button
                     onClick={handleClearDiet}
                     className="flex items-center gap-2 px-4 py-2 text-red-600 hover:text-red-700 transition-colors rounded-lg hover:bg-red-50"
@@ -500,6 +565,18 @@ function App() {
               throw err;
             }
           }}
+        />
+      )}
+
+      {showUpgradeModal && restrictedFeature && (
+        <PlanUpgradeModal
+          isOpen={showUpgradeModal}
+          onClose={() => {
+            setShowUpgradeModal(false);
+            setRestrictedFeature(null);
+          }}
+          feature={restrictedFeature.feature}
+          featureName={restrictedFeature.name}
         />
       )}
     </div>

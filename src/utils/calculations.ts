@@ -45,7 +45,7 @@ export function calculateMacros(calories: number, goal: 'muscle' | 'fat_loss') {
   }
 }
 
-export function generateMealPlan(calories: number, preferences: FoodPreferences, goal: 'muscle' | 'fat_loss') {
+export function generateMealPlan(calories: number, preferences: FoodPreferences, goal: 'muscle' | 'fat_loss', mealLimit: number = 5) {
   const macros = calculateMacros(calories, goal);
   const totalProtein = (calories * macros.protein) / 4;
   const totalCarbs = (calories * macros.carbs) / 4;
@@ -91,7 +91,8 @@ export function generateMealPlan(calories: number, preferences: FoodPreferences,
   const [protein1, protein2] = getTwoRandomOptions(breakfastProteins);
   const [fruit1, fruit2] = getTwoRandomOptions(preferences.fruits);
 
-  const meals = [
+  // Base meals (always included)
+  const baseMeals = [
     {
       name: 'Café da Manhã (25%)',
       foods: [
@@ -105,24 +106,6 @@ export function generateMealPlan(calories: number, preferences: FoodPreferences,
         protein: totalProtein * 0.25,
         carbs: totalCarbs * 0.25,
         fats: totalFats * 0.25
-      }
-    },
-    {
-      name: 'Lanche da Manhã (15%)',
-      foods: [
-        (() => {
-          const [f1, f2] = getTwoRandomOptions(preferences.fruits);
-          return `Opção 1: ${f1} (1 unidade média) ou ${f2} (1 unidade média)`;
-        })(),
-        'Opção 2: 3 colheres de sopa de aveia em flocos ou 2 fatias de pão integral',
-        goal === 'muscle' 
-          ? 'Opção 3: 1 copo de iogurte natural (200ml) ou 1 scoop de whey protein' 
-          : 'Chá verde sem açúcar (200ml)'
-      ],
-      macros: {
-        protein: totalProtein * 0.15,
-        carbs: totalCarbs * 0.15,
-        fats: totalFats * 0.15
       }
     },
     {
@@ -148,21 +131,6 @@ export function generateMealPlan(calories: number, preferences: FoodPreferences,
       }
     },
     {
-      name: 'Lanche da Tarde (15%)',
-      foods: [
-        'Opção 1: 1 porção de mix de castanhas (30g) ou 2 colheres de pasta de amendoim (30g)',
-        goal === 'muscle' 
-          ? 'Opção 2: 1 banana com whey protein ou 1 iogurte grego com granola' 
-          : 'Opção 2: 1 fruta média ou 1 iogurte natural',
-        'Chá ou café sem açúcar (200ml)'
-      ],
-      macros: {
-        protein: totalProtein * 0.15,
-        carbs: totalCarbs * 0.15,
-        fats: totalFats * 0.15
-      }
-    },
-    {
       name: 'Jantar (15%)',
       foods: [
         (() => {
@@ -182,6 +150,52 @@ export function generateMealPlan(calories: number, preferences: FoodPreferences,
       }
     }
   ];
+
+  // Additional meals for higher tier plans
+  const additionalMeals = [
+    {
+      name: 'Lanche da Manhã (15%)',
+      foods: [
+        (() => {
+          const [f1, f2] = getTwoRandomOptions(preferences.fruits);
+          return `Opção 1: ${f1} (1 unidade média) ou ${f2} (1 unidade média)`;
+        })(),
+        'Opção 2: 3 colheres de sopa de aveia em flocos ou 2 fatias de pão integral',
+        goal === 'muscle' 
+          ? 'Opção 3: 1 copo de iogurte natural (200ml) ou 1 scoop de whey protein' 
+          : 'Chá verde sem açúcar (200ml)'
+      ],
+      macros: {
+        protein: totalProtein * 0.15,
+        carbs: totalCarbs * 0.15,
+        fats: totalFats * 0.15
+      }
+    },
+    {
+      name: 'Lanche da Tarde (15%)',
+      foods: [
+        'Opção 1: 1 porção de mix de castanhas (30g) ou 2 colheres de pasta de amendoim (30g)',
+        goal === 'muscle' 
+          ? 'Opção 2: 1 banana com whey protein ou 1 iogurte grego com granola' 
+          : 'Opção 2: 1 fruta média ou 1 iogurte natural',
+        'Chá ou café sem açúcar (200ml)'
+      ],
+      macros: {
+        protein: totalProtein * 0.15,
+        carbs: totalCarbs * 0.15,
+        fats: totalFats * 0.15
+      }
+    }
+  ];
+
+  // Combine meals based on plan limit
+  let meals = [...baseMeals];
+  if (mealLimit > 3) {
+    meals.splice(1, 0, additionalMeals[0]); // Add morning snack after breakfast
+    if (mealLimit > 4) {
+      meals.splice(3, 0, additionalMeals[1]); // Add afternoon snack after lunch
+    }
+  }
 
   return {
     meals,
