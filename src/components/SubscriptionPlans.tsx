@@ -1,6 +1,8 @@
 import React from 'react';
 import { Check, Crown, Star, Zap } from 'lucide-react';
 import { useSubscription } from '../hooks/useSubscription';
+import StripeCheckoutButton from './StripeCheckoutButton';
+import StripePortalButton from './StripePortalButton';
 import type { Plan } from '../types/subscription';
 
 interface SubscriptionPlansProps {
@@ -9,24 +11,8 @@ interface SubscriptionPlansProps {
 }
 
 function SubscriptionPlans({ onSelectPlan, showCurrentPlan = true }: SubscriptionPlansProps) {
-  const { plans, loading, getCurrentPlan, createCheckoutSession } = useSubscription();
+  const { plans, loading, getCurrentPlan, currentSubscription } = useSubscription();
   const currentPlan = getCurrentPlan();
-
-  const handleSelectPlan = async (plan: Plan) => {
-    if (plan.name === 'Free') {
-      // Plano gratuito não precisa de checkout
-      onSelectPlan?.(plan.id);
-      return;
-    }
-
-    try {
-      const checkoutUrl = await createCheckoutSession(plan.id);
-      window.location.href = checkoutUrl;
-    } catch (error) {
-      console.error('Error creating checkout session:', error);
-      alert('Erro ao processar pagamento. Tente novamente.');
-    }
-  };
 
   const getPlanIcon = (planName: string) => {
     switch (planName) {
@@ -54,17 +40,9 @@ function SubscriptionPlans({ onSelectPlan, showCurrentPlan = true }: Subscriptio
     }
   };
 
-  const getButtonColor = (planName: string) => {
-    switch (planName) {
-      case 'Free':
-        return 'bg-gray-600 hover:bg-gray-700 text-white';
-      case 'Pro':
-        return 'bg-blue-600 hover:bg-blue-700 text-white';
-      case 'Plus':
-        return 'bg-purple-600 hover:bg-purple-700 text-white';
-      default:
-        return 'bg-gray-600 hover:bg-gray-700 text-white';
-    }
+  const handleFreePlan = () => {
+    // For free plan, just call the callback
+    onSelectPlan?.(plans.find(p => p.name === 'Free')?.id || '');
   };
 
   if (loading) {
@@ -143,20 +121,31 @@ function SubscriptionPlans({ onSelectPlan, showCurrentPlan = true }: Subscriptio
               ))}
             </ul>
 
-            <button
-              onClick={() => handleSelectPlan(plan)}
-              disabled={currentPlan === plan.name}
-              className={`
-                w-full py-3 px-6 rounded-lg font-medium transition-colors
-                ${currentPlan === plan.name 
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
-                  : getButtonColor(plan.name)
-                }
-              `}
-            >
-              {currentPlan === plan.name ? 'Plano Atual' : 
-               plan.name === 'Free' ? 'Usar Grátis' : 'Assinar Agora'}
-            </button>
+            <div className="space-y-3">
+              {currentPlan === plan.name ? (
+                <div className="space-y-2">
+                  <div className="w-full py-3 px-6 rounded-lg font-medium bg-gray-300 text-gray-500 text-center">
+                    Plano Atual
+                  </div>
+                  {currentSubscription && plan.name !== 'Free' && (
+                    <StripePortalButton className="w-full" />
+                  )}
+                </div>
+              ) : plan.name === 'Free' ? (
+                <button
+                  onClick={handleFreePlan}
+                  className="w-full py-3 px-6 rounded-lg font-medium bg-gray-600 hover:bg-gray-700 text-white transition-colors"
+                >
+                  Usar Grátis
+                </button>
+              ) : (
+                <StripeCheckoutButton
+                  planName={plan.name as 'Pro' | 'Plus'}
+                  price={plan.price}
+                  className="w-full"
+                />
+              )}
+            </div>
           </div>
         ))}
       </div>

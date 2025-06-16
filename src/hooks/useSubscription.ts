@@ -56,7 +56,7 @@ export function useSubscription() {
       if (limitsError && limitsError.code !== 'PGRST116') throw limitsError;
 
       if (!limits) {
-        // Criar ou atualizar limites padrão para usuário free usando upsert
+        // Criar limites padrão para usuário free usando upsert
         const { data: newLimits, error: createError } = await supabase
           .from('user_limits')
           .upsert(
@@ -82,32 +82,6 @@ export function useSubscription() {
       setError(err.message);
     }
   }, []);
-
-  const createCheckoutSession = useCallback(async (planId: string) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('User not authenticated');
-
-      const plan = plans.find(p => p.id === planId);
-      if (!plan) throw new Error('Plan not found');
-
-      // Aqui você integraria com a API do Stripe
-      // Por enquanto, vamos simular a criação de uma sessão
-      const checkoutUrl = `${window.location.origin}/checkout?plan=${planId}`;
-      
-      // Em produção, você faria uma chamada para sua API que criaria a sessão no Stripe
-      // const response = await fetch('/api/create-checkout-session', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ planId, userId: user.id })
-      // });
-      
-      return checkoutUrl;
-    } catch (err: any) {
-      console.error('Error creating checkout session:', err);
-      throw err;
-    }
-  }, [plans]);
 
   const cancelSubscription = useCallback(async () => {
     try {
@@ -178,7 +152,6 @@ export function useSubscription() {
     userLimits,
     loading,
     error,
-    createCheckoutSession,
     cancelSubscription,
     getCurrentPlan,
     hasFeature,
