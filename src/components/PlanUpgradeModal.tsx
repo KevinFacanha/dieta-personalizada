@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Crown, Star } from 'lucide-react';
 import { useSubscription } from '../hooks/useSubscription';
+import { useStripe } from '../hooks/useStripe';
 
 interface PlanUpgradeModalProps {
   isOpen: boolean;
@@ -10,7 +11,8 @@ interface PlanUpgradeModalProps {
 }
 
 function PlanUpgradeModal({ isOpen, onClose, feature, featureName }: PlanUpgradeModalProps) {
-  const { plans, createCheckoutSession } = useSubscription();
+  const { plans } = useSubscription();
+  const { createCheckoutSession } = useStripe();
 
   const handleUpgrade = async (planId: string) => {
     try {
