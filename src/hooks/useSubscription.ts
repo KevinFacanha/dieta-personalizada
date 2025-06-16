@@ -56,13 +56,18 @@ export function useSubscription() {
       if (limitsError && limitsError.code !== 'PGRST116') throw limitsError;
 
       if (!limits) {
-        // Criar limites padrão para usuário free
+        // Criar ou atualizar limites padrão para usuário free usando upsert
         const { data: newLimits, error: createError } = await supabase
           .from('user_limits')
-          .insert([{
-            user_id: user.id,
-            plan: 'Free'
-          }])
+          .upsert(
+            {
+              user_id: user.id,
+              plan: 'Free'
+            },
+            { 
+              onConflict: 'user_id' 
+            }
+          )
           .select()
           .single();
 
